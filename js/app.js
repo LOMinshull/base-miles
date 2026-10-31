@@ -405,6 +405,7 @@ function renderRoutes(view) {
   }
   $('#startBuild', view)?.addEventListener('click', () => {
     S.build ||= newBuild();
+    S.build.autoLocate = !S.build.points.length;
     S.building = true;
     S.route = null;
     renderRoutes(view);
@@ -465,6 +466,7 @@ function buildPanel() {
     <p class="build-stats" id="buildStats" aria-live="polite"></p>
     <p class="sub" id="buildMsg" style="font-size:.84rem"></p>
     <div class="actions" style="margin-top:10px">
+      <button class="btn" id="buildLocate">Use my location</button>
       <button class="btn" id="buildUndo">Undo</button>
       <button class="btn" id="buildLoop">Back to start</button>
       <button class="btn danger" id="buildClear">Clear</button>
@@ -500,6 +502,7 @@ function wirePlaceSearch(view, map) {
   };
   const pick = place => {
     close();
+    S.build.locating = false;
     input.value = place.name;
     if (place.bounds) map.fitBounds(place.bounds, { maxZoom: 13 });
     else map.setView(place.center, 13);
@@ -554,7 +557,7 @@ function wireBuilder(view, map) {
   const speed = usualSpeed();
 
   const refill = () => fillLegs(b, () => b.redraw());
-  const change = fn => (...args) => { fn(...args); refill(); update(); };
+  const change = fn => (...args) => { b.message = ''; fn(...args); refill(); update(); };
   const handlers = {
     color,
     onInsert: change((leg, latlng) => insertPoint(b, leg, latlng)),
@@ -569,12 +572,13 @@ function wireBuilder(view, map) {
     const done = isComplete(b);
     $('#buildStats', view).textContent = pts.length
       ? `${fixed(km)} km, ${int(gain)} m climbing${speed ? `, about ${hoursLabel(km / speed)} at your usual ${fixed(speed)} km/h` : ''}` : '';
-    $('#buildMsg', view).textContent = b.message || (b.busy ? 'Finding the route…'
+    $('#buildMsg', view).textContent = b.message || (b.locating ? 'Finding your location…' : b.busy ? 'Finding the route…'
       : !b.points.length ? 'Click the map to set your start.'
-      : b.points.length === 1 ? 'Click the next point on your route.'
+      : b.points.length === 1 ? 'Click the next point on your route. Drag S to change your start.'
       : 'Click the line to add a point, drag a point to move it, or click a point to remove it.');
     $('#buildUndo', view).disabled = $('#buildClear', view).disabled = !b.points.length;
     $('#buildLoop', view).disabled = b.points.length < 2;
+    $('#buildLocate', view).disabled = !!b.locating;
     $('#buildSave', view).disabled = $('#buildGpx', view).disabled = !done;
     const profile = thin(pts).filter(p => p[2] != null).map(p => [p[3] / 1000, p[2]]);
     const card = $('#buildProfile', view);
@@ -582,7 +586,30 @@ function wireBuilder(view, map) {
     if (!card.hidden) elevationChart($('#buildChart', view), profile, km);
   }
 
-  map.on('click', e => change(addPoint)(b, e.latlng));
+  // Sets the start, or moves it if the route already has one. Anything the rider picks first wins.
+  function locate() {
+    if (!navigator.geolocation) { b.message = 'This browser cannot share your location. Click the map to set your start.'; update(); return; }
+    b.locating = true;
+    b.message = '';
+    update();
+    navigator.geolocation.getCurrentPosition(({ coords }) => {
+      if (!b.locating) return;
+      b.locating = false;
+      const here = { lat: coords.latitude, lng: coords.longitude };
+      change(() => (b.points.length ? movePoint(b, 0, here) : addPoint(b, here)))();
+      map.setView(here, Math.max(map.getZoom(), 12));
+    }, err => {
+      if (!b.locating) return;
+      b.locating = false;
+      b.message = err.code === err.PERMISSION_DENIED
+        ? 'Location is blocked for this site. Allow it in your browser, or click the map to set your start.'
+        : 'Could not find your location. Click the map to set your start.';
+      update();
+    }, { timeout: 10000, maximumAge: 300000 });
+  }
+
+  map.on('click', e => { b.locating = false; change(addPoint)(b, e.latlng); });
+  $('#buildLocate', view).addEventListener('click', locate);
   $('#buildUndo', view).addEventListener('click', change(() => removePoint(b, b.points.length - 1)));
   $('#buildLoop', view).addEventListener('click', change(() => addPoint(b, b.points[0])));
   $('#buildClear', view).addEventListener('click', () => { b.points = []; b.legs = []; b.message = ''; update(); });
@@ -608,6 +635,7 @@ function wireBuilder(view, map) {
   b.redraw = update;
   if (b.legs.some(l => !l)) refill();
   update();
+  if (b.autoLocate) { b.autoLocate = false; locate(); }
 }
 
 /* Segments and bests */
