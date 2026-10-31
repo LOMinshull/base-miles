@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Base Miles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="vendor/leaflet.css">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="rail">
+      <a class="brand" href="#overview">Base Miles</a>
+      <nav id="nav" aria-label="Sections"></nav>
+      <p class="rail-note" id="railNote"></p>
+    </aside>
+    <div class="main">
+      <div class="sample-banner" id="sampleBanner" hidden>
+        <span><b>Sample data.</b> These rides are invented so you can see how the site works.</span>
+        <a href="#data">Import your rides</a>
+      </div>
+      <div class="filters" id="filters"></div>
+      <main id="view" tabindex="-1"></main>
+    </div>
+  </div>
+  <script src="vendor/leaflet.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
