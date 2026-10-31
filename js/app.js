@@ -5,6 +5,7 @@ import { loadAll, saveAll, saveSettings, clearAll, removeItem } from './store.js
 import { DESTINATIONS, FOCUS, monthsLabel, scoreDestination } from './holidays.js';
 import { buildSample } from './sample.js';
 import { checkWahoo, rememberSeen, forgetSeen } from './wahoo.js';
+import { PROFILES, newBuild, addPoint, insertPoint, movePoint, removePoint, fillLegs, summarize, isComplete, drawBuild, findPlace, downloadGpx } from './builder.js';
 
 const DAY = 86400000;
 const TABS = [
@@ -18,7 +19,7 @@ const HR_COLORS = ['--z1', '--hz2', '--z4', '--z5', '--z6'].map(v => `var(${v})`
 
 const S = {
   stored: { rides: [], routes: [], segments: [], settings: {} }, sample: false, model: null, range: '2y', kind: 'all',
-  rideSort: ['start', -1], rideSearch: '', openRide: null, route: null, map: null,
+  rideSort: ['start', -1], rideSearch: '', openRide: null, route: null, map: null, build: null, building: false,
   holiday: { focus: 'any', month: 0, days: 7 },
   wahoo: { state: 'checking' }, importing: false,
 };
@@ -340,26 +341,26 @@ function renderRoutes(view) {
   const routes = S.stored.routes;
   const selected = routes.find(r => r.id === S.route) || null;
   view.innerHTML = `
-    <div class="head"><h1>Routes and maps</h1><p>Everywhere you have ridden, with your Strava and Ride with GPS routes on top. Build routes in Ride with GPS, which also sends them straight to your ELEMNT.</p></div>
+    <div class="head"><h1>Routes and maps</h1><p>Everywhere you have ridden, with your saved routes on top. Build a new route on the map, then download it for your ELEMNT.</p></div>
     <div class="map-layout">
       <div id="map" role="application" aria-label="Map of your rides and routes"></div>
       <div style="display:flex;flex-direction:column;gap:16px;min-width:0">
-        <section class="panel"><h2>Ride with GPS</h2>
-          <div class="actions" style="margin-top:10px">
-            <a class="btn primary" href="https://ridewithgps.com/routes/new" target="_blank" rel="noopener">Build a route</a>
-            <a class="btn" href="https://ridewithgps.com/explore" target="_blank" rel="noopener">Explore</a>
-          </div>
+        ${S.building ? buildPanel() : `<section class="panel"><h2>Route builder</h2>
+          <p class="sub" style="margin-top:3px">Click the map and the route follows the roads, with distance and climbing as you go.</p>
+          <div class="actions" style="margin-top:10px"><button class="btn primary" id="startBuild">${S.build?.points.length ? 'Continue your route' : 'Build a route'}</button></div>
+        </section>`}
+        <section class="panel"><h2>Saved routes</h2>
+          ${routes.length ? `<div class="route-list">${routes.map(r => `<button class="route-item" data-route="${esc(r.id)}" aria-pressed="${r.id === S.route}"><span>${esc(r.name)}</span><span class="source">${esc(r.source)}</span>${r.km ? `<small>${fixed(r.km)} km, ${int(r.gain)} m climbing</small>` : '<small>Linked route</small>'}</button>`).join('')}</div>`
+            : '<p class="sub" style="margin-top:8px">Routes you build appear here. Strava routes arrive with your archive, and you can add GPX files under Your data.</p>'}
+        </section>
+        <details class="panel"><summary>Link a Ride with GPS route</summary>
           <form class="inline-form" id="rwgpsForm">
             <input class="text-input" id="rwgpsUrl" aria-label="Ride with GPS route link" placeholder="Paste a route link">
             <input class="text-input" id="rwgpsName" aria-label="Route name" placeholder="Name this route">
             <button class="btn" type="submit">Add</button>
           </form>
-          <p class="sub" id="rwgpsMsg" style="margin-top:6px;font-size:.84rem">Linked routes must be public or shareable to display here. For private routes, export a GPX file and add it under Your data.</p>
-        </section>
-        <section class="panel"><h2>Saved routes</h2>
-          ${routes.length ? `<div class="route-list">${routes.map(r => `<button class="route-item" data-route="${esc(r.id)}" aria-pressed="${r.id === S.route}"><span>${esc(r.name)}</span><span class="source">${esc(r.source)}</span>${r.km ? `<small>${fixed(r.km)} km, ${int(r.gain)} m climbing</small>` : '<small>Linked route</small>'}</button>`).join('')}</div>`
-            : '<p class="sub" style="margin-top:8px">Strava routes arrive with your archive. You can also add GPX files under Your data.</p>'}
-        </section>
+          <p class="sub" id="rwgpsMsg" style="margin-top:6px;font-size:.84rem">Linked routes must be public or shareable to display here.</p>
+        </details>
       </div>
     </div>
     <div id="routeDetail"></div>`;
@@ -381,30 +382,41 @@ function renderRoutes(view) {
     L.polyline(r.track, { renderer, color: lineColor, weight: rides.length < 100 ? 3 : 2, opacity: rides.length < 100 ? 0.75 : 0.28, interactive: false }).addTo(map);
     r.track.forEach(p => bounds.extend(p));
   }
-  if (selected?.pts) {
+  if (!S.building && selected?.pts) {
     const line = L.polyline(selected.pts.map(p => [p[0], p[1]]), { color: getComputedStyle(document.documentElement).getPropertyValue('--s1').trim(), weight: 4 }).addTo(map);
     map.fitBounds(line.getBounds(), { padding: [24, 24] });
-  } else if (bounds.isValid()) map.fitBounds(bounds, { padding: [20, 20] });
+  } else if (S.building && S.build.points.length) map.fitBounds(L.latLngBounds(S.build.points), { padding: [40, 40], maxZoom: 14 });
+  else if (bounds.isValid()) map.fitBounds(bounds, { padding: [20, 20] });
   else map.setView([50, 5], 4);
 
   const detail = $('#routeDetail', view);
-  if (selected?.pts) {
-    const profile = selected.pts.filter(p => p[2] != null).map(p => [p[3] / 1000, p[2]]);
+  if (S.building) {
+    wireBuilder(view, map);
+  } else if (selected?.pts) {
+    const profile = thin(selected.pts).filter(p => p[2] != null).map(p => [p[3] / 1000, p[2]]);
     detail.innerHTML = `<section class="panel"><h2>${esc(selected.name)}</h2><p class="sub">${fixed(selected.km)} km with ${int(selected.gain)} m of climbing.</p><div class="chart" id="routeProfile"></div>
-      <div class="actions" style="margin-top:10px"><button class="btn danger" id="dropRoute">Remove route</button></div></section>`;
-    if (profile.length > 1) {
-      const end = Math.ceil(selected.km);
-      const step = Math.max(5, Math.ceil(end / 6 / 5) * 5);
-      const xTicks = [];
-      for (let k = 0; k <= end; k += step) xTicks.push(k);
-      lineChart($('#routeProfile', detail), { label: 'Elevation profile', h: 170, xTicks, xTickFmt: k => `${k} km`, xFmt: k => `${k.toFixed(1)} km`, yFmt: v => `${Math.round(v)} m`, series: [{ name: 'Elevation', color: 'var(--s1)', points: profile, area: true }] });
-    }
+      <div class="actions" style="margin-top:10px">${selected.waypoints ? '<button class="btn" id="editRoute">Edit route</button><button class="btn" id="routeGpx">Download GPX</button>' : ''}<button class="btn danger" id="dropRoute">Remove route</button></div></section>`;
+    if (profile.length > 1) elevationChart($('#routeProfile', detail), profile, selected.km);
   } else if (selected) {
     detail.innerHTML = `<section class="panel"><h2>${esc(selected.name)}</h2>
       <p class="sub">If the map stays blank, open the route on Ride with GPS.</p>
       <iframe class="embed" title="${esc(selected.name)} on Ride with GPS" src="https://ridewithgps.com/embeds?type=route&id=${encodeURIComponent(selected.rwgpsId)}&sampleGraph=true"></iframe>
       <div class="actions" style="margin-top:10px"><a class="btn" href="${esc(selected.url)}" target="_blank" rel="noopener">Open on Ride with GPS</a><button class="btn danger" id="dropRoute">Remove route</button></div></section>`;
   }
+  $('#startBuild', view)?.addEventListener('click', () => {
+    S.build ||= newBuild();
+    S.building = true;
+    S.route = null;
+    renderRoutes(view);
+  });
+  $('#routeGpx', detail)?.addEventListener('click', () => downloadGpx(selected.name, selected.pts));
+  $('#editRoute', detail)?.addEventListener('click', () => {
+    const { id, name, profile, waypoints } = selected;
+    S.build = { ...newBuild(), id, name, profile, points: waypoints.map(([lat, lng]) => ({ lat, lng })), legs: waypoints.slice(1).map(() => null) };
+    S.building = true;
+    S.route = null;
+    renderRoutes(view);
+  });
   $('#dropRoute', detail)?.addEventListener('click', async () => {
     S.stored.routes = S.stored.routes.filter(r => r.id !== selected.id);
     await removeItem('routes', selected.id);
@@ -427,6 +439,124 @@ function renderRoutes(view) {
     S.route = route.id;
     renderRoutes(view);
   });
+}
+
+const thin = pts => {
+  const step = Math.ceil(pts.length / 600);
+  return pts.filter((_, i) => i % step === 0 || i === pts.length - 1);
+};
+
+function elevationChart(el, profile, km) {
+  const end = Math.ceil(km);
+  const step = Math.max(1, Math.ceil(end / 6 / 5) * 5);
+  const xTicks = [];
+  for (let k = 0; k <= end; k += step) xTicks.push(k);
+  lineChart(el, { label: 'Elevation profile', h: 170, xTicks, xTickFmt: k => `${k} km`, xFmt: k => `${k.toFixed(1)} km`, yFmt: v => `${Math.round(v)} m`, series: [{ name: 'Elevation', color: 'var(--s1)', points: profile, area: true }] });
+}
+
+function buildPanel() {
+  const b = S.build;
+  return `<section class="panel" id="buildPanel"><h2>Route builder</h2>
+    <form class="inline-form" id="placeForm">
+      <input class="text-input" id="placeQuery" aria-label="Find a place" placeholder="Find a place">
+      <button class="btn" type="submit">Go</button>
+    </form>
+    <div class="seg" role="group" aria-label="Type of route" style="margin-top:10px">${PROFILES.map(([id, label]) => `<button type="button" data-profile="${id}" aria-pressed="${b.profile === id}">${label}</button>`).join('')}</div>
+    <p class="build-stats" id="buildStats" aria-live="polite"></p>
+    <p class="sub" id="buildMsg" style="font-size:.84rem"></p>
+    <div class="actions" style="margin-top:10px">
+      <button class="btn" id="buildUndo">Undo</button>
+      <button class="btn" id="buildLoop">Back to start</button>
+      <button class="btn danger" id="buildClear">Clear</button>
+    </div>
+    <input class="text-input" id="buildName" aria-label="Route name" placeholder="Name this route" value="${esc(b.name)}" style="margin-top:12px">
+    <div class="actions" style="margin-top:10px">
+      <button class="btn primary" id="buildSave">Save route</button>
+      <button class="btn" id="buildGpx">Download GPX</button>
+      <button class="btn" id="buildClose">Close</button>
+    </div>
+  </section>`;
+}
+
+function usualSpeed() {
+  const outdoor = S.model.rides.filter(r => !r.indoor && r.avgSpeed).slice(-20);
+  return outdoor.length ? outdoor.reduce((sum, r) => sum + r.avgSpeed, 0) / outdoor.length * 3.6 : null;
+}
+
+function wireBuilder(view, map) {
+  const b = S.build;
+  const group = L.layerGroup().addTo(map);
+  const detail = $('#routeDetail', view);
+  const color = getComputedStyle(document.documentElement).getPropertyValue('--s1').trim();
+  map.getContainer().classList.add('building');
+  detail.innerHTML = '<section class="panel" id="buildProfile" hidden><h2>Elevation</h2><div class="chart" id="buildChart"></div></section>';
+  const speed = usualSpeed();
+
+  const refill = () => fillLegs(b, () => b.redraw());
+  const change = fn => (...args) => { fn(...args); refill(); update(); };
+  const handlers = {
+    color,
+    onInsert: change((leg, latlng) => insertPoint(b, leg, latlng)),
+    onMove: change((i, latlng) => movePoint(b, i, latlng)),
+    onRemove: change(i => removePoint(b, i)),
+  };
+
+  function update() {
+    if (S.build !== b || !$('#buildStats', view)) return;
+    drawBuild(b, group, handlers);
+    const { pts, km, gain } = summarize(b);
+    const done = isComplete(b);
+    $('#buildStats', view).textContent = pts.length
+      ? `${fixed(km)} km, ${int(gain)} m climbing${speed ? `, about ${hoursLabel(km / speed)} at your usual ${fixed(speed)} km/h` : ''}` : '';
+    $('#buildMsg', view).textContent = b.message || (b.busy ? 'Finding the route…'
+      : !b.points.length ? 'Click the map to set your start.'
+      : b.points.length === 1 ? 'Click the next point on your route.'
+      : 'Click the line to add a point, drag a point to move it, or click a point to remove it.');
+    $('#buildUndo', view).disabled = $('#buildClear', view).disabled = !b.points.length;
+    $('#buildLoop', view).disabled = b.points.length < 2;
+    $('#buildSave', view).disabled = $('#buildGpx', view).disabled = !done;
+    const profile = thin(pts).filter(p => p[2] != null).map(p => [p[3] / 1000, p[2]]);
+    const card = $('#buildProfile', view);
+    card.hidden = profile.length < 2;
+    if (!card.hidden) elevationChart($('#buildChart', view), profile, km);
+  }
+
+  map.on('click', e => change(addPoint)(b, e.latlng));
+  $('#buildUndo', view).addEventListener('click', change(() => removePoint(b, b.points.length - 1)));
+  $('#buildLoop', view).addEventListener('click', change(() => addPoint(b, b.points[0])));
+  $('#buildClear', view).addEventListener('click', () => { b.points = []; b.legs = []; b.message = ''; update(); });
+  $('#buildClose', view).addEventListener('click', () => { S.building = false; renderRoutes(view); });
+  $('#buildName', view).addEventListener('input', e => { b.name = e.target.value; });
+  view.querySelectorAll('[data-profile]').forEach(btn => btn.addEventListener('click', change(() => {
+    b.profile = btn.dataset.profile;
+    b.legs = b.legs.map(() => null);
+    view.querySelectorAll('[data-profile]').forEach(x => x.setAttribute('aria-pressed', x === btn));
+  })));
+  const routeName = () => b.name.trim() || `Route of ${dayLabel(Date.now())}`;
+  $('#buildGpx', view).addEventListener('click', () => downloadGpx(routeName(), summarize(b).pts));
+  $('#buildSave', view).addEventListener('click', async () => {
+    const route = { ...summarize(b), id: b.id || `built-${Date.now()}`, name: routeName(), source: 'Built here', profile: b.profile, waypoints: b.points.map(p => [p.lat, p.lng]) };
+    S.stored.routes = [route, ...S.stored.routes.filter(r => r.id !== route.id)];
+    await saveAll('routes', [route]);
+    S.build = null;
+    S.building = false;
+    S.route = route.id;
+    renderRoutes(view);
+  });
+  $('#placeForm', view).addEventListener('submit', async e => {
+    e.preventDefault();
+    const query = $('#placeQuery', view).value.trim();
+    if (!query) return;
+    try {
+      const area = await findPlace(query);
+      b.message = area ? '' : `Could not find ${query}.`;
+      if (area) map.fitBounds(area, { maxZoom: 13 });
+    } catch { b.message = 'Place search is not available right now.'; }
+    update();
+  });
+  b.redraw = update;
+  if (b.legs.some(l => !l)) refill();
+  update();
 }
 
 /* Segments and bests */
