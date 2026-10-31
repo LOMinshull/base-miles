@@ -47,3 +47,7 @@ under `Apps` and then at the top level, for a folder with "wahoo" in its name. T
 Maps use OpenStreetMap and OpenTopoMap tiles, so the Routes tab needs an internet connection. The route builder
 starts from your current location if you allow it, and sends your route points to BRouter for routing, and place searches go to Photon with the map's rough position, so nearby places
 come first. Your rides are not sent.
+
+The builder uses BRouter's open cycling profiles on OpenStreetMap data, with Quiet roads as the default. Strava's
+route and heatmap data is not open, so it is not used. The Cycling map and Cycle routes layers come from CyclOSM
+and Waymarked Trails.
