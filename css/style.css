@@ -152,6 +152,7 @@ tr.link { cursor: pointer; }
 tr.link:hover td { background: var(--surface-2); }
 details.as-table { margin-top: 10px; font-size: 0.88rem; }
 details.as-table summary { color: var(--fg-2); cursor: pointer; }
+details.panel summary { cursor: pointer; font-weight: 600; }
 
 .zone-strip { display: flex; gap: 2px; height: 14px; margin-top: 12px; }
 .zone-strip span { min-width: 0; }
@@ -184,6 +185,11 @@ details.as-table summary { color: var(--fg-2); cursor: pointer; }
 .embed { width: 100%; height: 640px; border: 0; border-radius: 8px; display: block; margin-top: 12px; }
 .inline-form { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .inline-form .text-input { flex: 1 1 220px; min-width: 0; }
+#map.building { cursor: crosshair; }
+.way { display: block; box-sizing: border-box; width: 100%; height: 100%; border-radius: 50%; background: var(--surface); border: 3px solid var(--accent); box-shadow: 0 1px 3px rgb(0 0 0 / 0.4); cursor: grab; }
+.way.end { background: var(--accent); border-color: var(--surface); color: var(--surface); font: 700 12px/18px var(--body); text-align: center; }
+.build-stats { margin-top: 12px; font-weight: 600; min-height: 1.3em; }
+.btn:disabled { opacity: 0.5; cursor: default; }
 
 .holiday-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .holiday { display: flex; flex-direction: column; gap: 10px; }
