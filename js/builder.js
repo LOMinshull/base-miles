@@ -1,9 +1,10 @@
 // Route builder: click the map, and BRouter snaps each leg to roads and adds elevation.
-// Only the clicked points leave the browser, and rides are never sent.
+// Only clicked points and place searches leave the browser, and rides are never sent.
 import { haversine } from './metrics.js';
 
 const ROUTER = 'https://brouter.de/brouter';
-const SEARCH = 'https://nominatim.openstreetmap.org/search';
+const SEARCH = 'https://photon.komoot.io/api/';
+const NOT_PLACES = new Set(['amenity', 'shop', 'highway', 'railway', 'building', 'office', 'craft', 'aeroway', 'public_transport']);
 export const PROFILES = [['fastbike', 'Road'], ['fastbike-lowtraffic', 'Quiet roads'], ['gravel', 'Gravel']];
 
 export const newBuild = () => ({ id: null, name: '', profile: PROFILES[0][0], points: [], legs: [], message: '', busy: false });
@@ -108,13 +109,26 @@ export function drawBuild(build, group, { color, onInsert, onMove, onRemove }) {
   });
 }
 
-export async function findPlace(query) {
-  const res = await fetch(`${SEARCH}?format=jsonv2&limit=1&q=${encodeURIComponent(query)}`);
+// Results are ranked around the map's centre, rounded to about 10 km, so nearby places come first.
+export async function searchPlaces(query, center, signal) {
+  const params = new URLSearchParams({ q: query, limit: 20, lang: 'en', zoom: 9, lat: center.lat.toFixed(1), lon: center.lng.toFixed(1) });
+  const res = await fetch(`${SEARCH}?${params}`, { signal });
   if (!res.ok) throw new Error('search failed');
-  const [hit] = await res.json();
-  if (!hit) return null;
-  const [south, north, west, east] = hit.boundingbox.map(Number);
-  return [[south, west], [north, east]];
+  const { features } = await res.json();
+  const places = features.filter(f => !NOT_PLACES.has(f.properties.osm_key));
+  const seen = new Set();
+  return (places.length ? places : features).map(({ properties: p, geometry }) => {
+    const detail = [...new Set([p.city, p.county, p.state, p.country])].filter(v => v && v !== p.name).join(', ');
+    const [west, north, east, south] = p.extent || [];
+    return {
+      name: p.name || p.street || p.city, detail,
+      center: [geometry.coordinates[1], geometry.coordinates[0]],
+      bounds: p.extent ? [[south, west], [north, east]] : null,
+    };
+  }).filter(place => {
+    const key = `${place.name}|${place.detail}`;
+    return place.name && !seen.has(key) && seen.add(key);
+  }).slice(0, 6);
 }
 
 const xml = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));

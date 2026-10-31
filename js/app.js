@@ -5,7 +5,7 @@ import { loadAll, saveAll, saveSettings, clearAll, removeItem } from './store.js
 import { DESTINATIONS, FOCUS, monthsLabel, scoreDestination } from './holidays.js';
 import { buildSample } from './sample.js';
 import { checkWahoo, rememberSeen, forgetSeen } from './wahoo.js';
-import { PROFILES, newBuild, addPoint, insertPoint, movePoint, removePoint, fillLegs, summarize, isComplete, drawBuild, findPlace, downloadGpx } from './builder.js';
+import { PROFILES, newBuild, addPoint, insertPoint, movePoint, removePoint, fillLegs, summarize, isComplete, drawBuild, searchPlaces, downloadGpx } from './builder.js';
 
 const DAY = 86400000;
 const TABS = [
@@ -457,9 +457,9 @@ function elevationChart(el, profile, km) {
 function buildPanel() {
   const b = S.build;
   return `<section class="panel" id="buildPanel"><h2>Route builder</h2>
-    <form class="inline-form" id="placeForm">
-      <input class="text-input" id="placeQuery" aria-label="Find a place" placeholder="Find a place">
-      <button class="btn" type="submit">Go</button>
+    <form class="place-search" id="placeForm">
+      <input class="text-input" id="placeQuery" role="combobox" aria-label="Find a place" aria-autocomplete="list" aria-controls="placeList" aria-expanded="false" autocomplete="off" placeholder="Find a place">
+      <ul class="place-list" id="placeList" role="listbox" aria-label="Matching places" hidden></ul>
     </form>
     <div class="seg" role="group" aria-label="Type of route" style="margin-top:10px">${PROFILES.map(([id, label]) => `<button type="button" data-profile="${id}" aria-pressed="${b.profile === id}">${label}</button>`).join('')}</div>
     <p class="build-stats" id="buildStats" aria-live="polite"></p>
@@ -481,6 +481,67 @@ function buildPanel() {
 function usualSpeed() {
   const outdoor = S.model.rides.filter(r => !r.indoor && r.avgSpeed).slice(-20);
   return outdoor.length ? outdoor.reduce((sum, r) => sum + r.avgSpeed, 0) / outdoor.length * 3.6 : null;
+}
+
+function wirePlaceSearch(view, map) {
+  const input = $('#placeQuery', view), list = $('#placeList', view);
+  let places = [], active = -1, timer = null, request = null;
+
+  const show = html => {
+    list.innerHTML = html;
+    list.hidden = !html;
+    input.setAttribute('aria-expanded', !list.hidden);
+  };
+  const close = () => { clearTimeout(timer); request?.abort(); places = []; active = -1; show(''); };
+  const highlight = i => {
+    active = i;
+    list.querySelectorAll('[role="option"]').forEach((el, n) => el.setAttribute('aria-selected', n === i));
+    input.setAttribute('aria-activedescendant', i < 0 ? '' : `place-${i}`);
+  };
+  const pick = place => {
+    close();
+    input.value = place.name;
+    if (place.bounds) map.fitBounds(place.bounds, { maxZoom: 13 });
+    else map.setView(place.center, 13);
+  };
+
+  async function search() {
+    clearTimeout(timer);
+    request?.abort();
+    const query = input.value.trim();
+    if (query.length < 3) { close(); return; }
+    const mine = request = new AbortController();
+    try {
+      places = await searchPlaces(query, map.getCenter(), mine.signal);
+      active = -1;
+      show(places.length ? places.map((p, i) => `<li role="option" id="place-${i}" data-place="${i}" aria-selected="false"><b>${esc(p.name)}</b><small>${esc(p.detail)}</small></li>`).join('')
+        : '<li class="none">No places found</li>');
+    } catch (err) {
+      if (err.name !== 'AbortError') show('<li class="none">Place search is not available right now</li>');
+    }
+  }
+
+  input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(search, 250); });
+  input.addEventListener('blur', close);
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Escape') close();
+    else if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && places.length) {
+      e.preventDefault();
+      highlight((active + (e.key === 'ArrowDown' ? 1 : places.length - (active < 0 ? 0 : 1))) % places.length);
+    }
+  });
+  // Keeps focus in the box, so the list is still open when the click lands.
+  list.addEventListener('pointerdown', e => e.preventDefault());
+  list.addEventListener('click', e => {
+    const place = places[e.target.closest('[data-place]')?.dataset.place];
+    if (place) pick(place);
+  });
+  $('#placeForm', view).addEventListener('submit', async e => {
+    e.preventDefault();
+    if (active < 0) await search();
+    const place = places[Math.max(active, 0)];
+    if (place) pick(place);
+  });
 }
 
 function wireBuilder(view, map) {
@@ -543,17 +604,7 @@ function wireBuilder(view, map) {
     S.route = route.id;
     renderRoutes(view);
   });
-  $('#placeForm', view).addEventListener('submit', async e => {
-    e.preventDefault();
-    const query = $('#placeQuery', view).value.trim();
-    if (!query) return;
-    try {
-      const area = await findPlace(query);
-      b.message = area ? '' : `Could not find ${query}.`;
-      if (area) map.fitBounds(area, { maxZoom: 13 });
-    } catch { b.message = 'Place search is not available right now.'; }
-    update();
-  });
+  wirePlaceSearch(view, map);
   b.redraw = update;
   if (b.legs.some(l => !l)) refill();
   update();
