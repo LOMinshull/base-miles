@@ -45,5 +45,5 @@ under `Apps` and then at the top level, for a folder with "wahoo" in its name. T
   change when it is larger than normal ride-to-ride variation.
 
 Maps use OpenStreetMap and OpenTopoMap tiles, so the Routes tab needs an internet connection. The route builder
-sends the points you click to BRouter for routing, and place searches go to Photon with the map's rough position, so nearby places
+starts from your current location if you allow it, and sends your route points to BRouter for routing, and place searches go to Photon with the map's rough position, so nearby places
 come first. Your rides are not sent.
