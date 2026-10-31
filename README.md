@@ -48,6 +48,7 @@ Maps use OpenStreetMap and OpenTopoMap tiles, so the Routes tab needs an interne
 starts from your current location if you allow it, and sends your route points to BRouter for routing, and place searches go to Photon with the map's rough position, so nearby places
 come first. Your rides are not sent.
 
-The builder uses BRouter's open cycling profiles on OpenStreetMap data, with Quiet roads as the default. Strava's
+The builder uses BRouter on OpenStreetMap data. Quiet roads, the default, is our own stricter profile in
+`profiles/quiet-roads.brf`, which the site uploads to BRouter when needed. Strava's
 route and heatmap data is not open, so it is not used. The Cycling map and Cycle routes layers come from CyclOSM
 and Waymarked Trails.
