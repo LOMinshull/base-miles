@@ -5,7 +5,8 @@ import { haversine } from './metrics.js';
 const ROUTER = 'https://brouter.de/brouter';
 const SEARCH = 'https://photon.komoot.io/api/';
 const NOT_PLACES = new Set(['amenity', 'shop', 'highway', 'railway', 'building', 'office', 'craft', 'aeroway', 'public_transport']);
-export const PROFILES = [['fastbike', 'Road'], ['fastbike-lowtraffic', 'Quiet roads'], ['gravel', 'Gravel']];
+// Quiet roads leads because in testing around London it cut A-road riding from 29-49% to 2-7% for about 1 km extra.
+export const PROFILES = [['fastbike-lowtraffic', 'Quiet roads'], ['safety', 'Cycle routes'], ['gravel', 'Gravel'], ['fastbike', 'Fastest']];
 
 export const newBuild = () => ({ id: null, name: '', profile: PROFILES[0][0], points: [], legs: [], message: '', busy: false });
 
@@ -17,9 +18,18 @@ async function fetchLeg(a, b, profile) {
   if (!res.ok) throw new NoRoute(/killed|timeout/i.test(await res.text())
     ? 'That point is too far to route in one go. Click somewhere closer and build up in shorter steps.'
     : 'No route to that point. Try somewhere closer to a road.');
-  const coords = (await res.json()).features?.[0]?.geometry?.coordinates;
+  const feature = (await res.json()).features?.[0];
+  const coords = feature?.geometry?.coordinates;
   if (!coords?.length) throw new NoRoute('No route to that point. Try somewhere closer to a road.');
-  return coords.map(([lng, lat, ele]) => [lat, lng, ele ?? null]);
+  const leg = coords.map(([lng, lat, ele]) => [lat, lng, ele ?? null]);
+  leg.mainKm = mainRoadKm(feature.properties.messages);
+  return leg;
+}
+
+function mainRoadKm([header, ...rows] = []) {
+  if (!header) return 0;
+  const dist = header.indexOf('Distance'), tags = header.indexOf('WayTags');
+  return rows.reduce((km, r) => km + (/highway=(trunk|primary)/.test(r[tags]) ? r[dist] / 1000 : 0), 0);
 }
 
 export function removePoint(build, i) {
@@ -84,7 +94,8 @@ export function summarize(build) {
     }
     pts.push([+lat.toFixed(6), +lng.toFixed(6), ele, Math.round(total)]);
   });
-  return { pts, km: total / 1000, gain: Math.round(gain) };
+  const mainKm = build.legs.reduce((sum, leg) => sum + (leg?.mainKm || 0), 0);
+  return { pts, km: total / 1000, gain: Math.round(gain), mainShare: total ? mainKm / (total / 1000) : 0 };
 }
 
 export const isComplete = build => build.legs.length > 0 && build.legs.every(Boolean) && !build.busy;

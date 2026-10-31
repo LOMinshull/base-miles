@@ -19,7 +19,7 @@ const HR_COLORS = ['--z1', '--hz2', '--z4', '--z5', '--z6'].map(v => `var(${v})`
 
 const S = {
   stored: { rides: [], routes: [], segments: [], settings: {} }, sample: false, model: null, range: '2y', kind: 'all',
-  rideSort: ['start', -1], rideSearch: '', openRide: null, route: null, map: null, build: null, building: false,
+  rideSort: ['start', -1], rideSearch: '', openRide: null, route: null, map: null, mapLayer: null, build: null, building: false,
   holiday: { focus: 'any', month: 0, days: 7 },
   wahoo: { state: 'checking' }, importing: false,
 };
@@ -370,11 +370,20 @@ function renderRoutes(view) {
   S.map = map;
   const roads = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19, attribution: '&copy; OpenStreetMap contributors',
-  }).addTo(map);
+  });
   const terrain = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
     maxZoom: 17, attribution: '&copy; OpenStreetMap contributors, SRTM, &copy; OpenTopoMap (CC-BY-SA)',
   });
-  L.control.layers({ Roads: roads, Terrain: terrain }, null, { collapsed: false }).addTo(map);
+  const cycling = L.tileLayer('https://{s}.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png', {
+    subdomains: 'abc', maxZoom: 20, attribution: '&copy; OpenStreetMap contributors, CyclOSM',
+  });
+  const cycleRoutes = L.tileLayer('https://tile.waymarkedtrails.org/cycling/{z}/{x}/{y}.png', {
+    maxZoom: 18, attribution: 'Cycle routes &copy; Waymarked Trails',
+  });
+  const bases = { Roads: roads, Terrain: terrain, 'Cycling map': cycling };
+  (bases[S.mapLayer] || roads).addTo(map);
+  map.on('baselayerchange', e => { S.mapLayer = e.name; });
+  L.control.layers(bases, { 'Cycle routes': cycleRoutes }, { collapsed: false }).addTo(map);
   const renderer = L.canvas();
   const lineColor = getComputedStyle(document.documentElement).getPropertyValue('--s2').trim();
   const bounds = L.latLngBounds([]);
@@ -568,10 +577,10 @@ function wireBuilder(view, map) {
   function update() {
     if (S.build !== b || !$('#buildStats', view)) return;
     drawBuild(b, group, handlers);
-    const { pts, km, gain } = summarize(b);
+    const { pts, km, gain, mainShare } = summarize(b);
     const done = isComplete(b);
     $('#buildStats', view).textContent = pts.length
-      ? `${fixed(km)} km, ${int(gain)} m climbing${speed ? `, about ${hoursLabel(km / speed)} at your usual ${fixed(speed)} km/h` : ''}` : '';
+      ? `${fixed(km)} km, ${int(gain)} m climbing, ${Math.round(mainShare * 100)}% on main roads${speed ? `, about ${hoursLabel(km / speed)} at your usual ${fixed(speed)} km/h` : ''}` : '';
     $('#buildMsg', view).textContent = b.message || (b.locating ? 'Finding your location…' : b.busy ? 'Finding the route…'
       : !b.points.length ? 'Click the map to set your start.'
       : b.points.length === 1 ? 'Click the next point on your route. Drag S to change your start.'
