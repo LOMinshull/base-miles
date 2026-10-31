@@ -5,19 +5,36 @@ import { haversine } from './metrics.js';
 const ROUTER = 'https://brouter.de/brouter';
 const SEARCH = 'https://photon.komoot.io/api/';
 const NOT_PLACES = new Set(['amenity', 'shop', 'highway', 'railway', 'building', 'office', 'craft', 'aeroway', 'public_transport']);
-// Quiet roads leads because in testing around London it cut A-road riding from 29-49% to 2-7% for about 1 km extra.
-export const PROFILES = [['fastbike-lowtraffic', 'Quiet roads'], ['safety', 'Cycle routes'], ['gravel', 'Gravel'], ['fastbike', 'Fastest']];
+// Quiet roads is our own profile, uploaded to BRouter on first use. On routes across west London it cut
+// A-road riding to about 4% from 12-17% with BRouter's stock low-traffic profile, for 1-3 km extra.
+const QUIET = 'quiet-roads';
+export const PROFILES = [[QUIET, 'Quiet roads'], ['safety', 'Cycle routes'], ['gravel', 'Gravel'], ['fastbike', 'Fastest']];
 
 export const newBuild = () => ({ id: null, name: '', profile: PROFILES[0][0], points: [], legs: [], message: '', busy: false });
 
 class NoRoute extends Error {}
 
-async function fetchLeg(a, b, profile) {
+let quietId = null;
+
+async function uploadQuiet() {
+  const text = await (await fetch('profiles/quiet-roads.brf')).text();
+  const { profileid } = await (await fetch(`${ROUTER}/profile`, { method: 'POST', body: text })).json();
+  if (!profileid) throw new Error('profile rejected');
+  quietId = profileid;
+}
+
+async function fetchLeg(a, b, profile, retry = true) {
+  if (profile === QUIET && !quietId) await uploadQuiet();
   const lonlats = `${a.lng.toFixed(6)},${a.lat.toFixed(6)}|${b.lng.toFixed(6)},${b.lat.toFixed(6)}`;
-  const res = await fetch(`${ROUTER}?lonlats=${lonlats}&profile=${profile}&alternativeidx=0&format=geojson`);
-  if (!res.ok) throw new NoRoute(/killed|timeout/i.test(await res.text())
-    ? 'That point is too far to route in one go. Click somewhere closer and build up in shorter steps.'
-    : 'No route to that point. Try somewhere closer to a road.');
+  const res = await fetch(`${ROUTER}?lonlats=${lonlats}&profile=${profile === QUIET ? quietId : profile}&alternativeidx=0&format=geojson`);
+  if (!res.ok) {
+    const reason = await res.text();
+    // The server drops uploaded profiles eventually, so a long-open page may need to send it again.
+    if (profile === QUIET && retry && res.status >= 500) { quietId = null; return fetchLeg(a, b, profile, false); }
+    throw new NoRoute(/killed|timeout/i.test(reason)
+      ? 'That point is too far to route in one go. Click somewhere closer and build up in shorter steps.'
+      : 'No route to that point. Try somewhere closer to a road.');
+  }
   const feature = (await res.json()).features?.[0];
   const coords = feature?.geometry?.coordinates;
   if (!coords?.length) throw new NoRoute('No route to that point. Try somewhere closer to a road.');

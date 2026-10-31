@@ -422,7 +422,7 @@ function renderRoutes(view) {
   $('#routeGpx', detail)?.addEventListener('click', () => downloadGpx(selected.name, selected.pts));
   $('#editRoute', detail)?.addEventListener('click', () => {
     const { id, name, profile, waypoints } = selected;
-    S.build = { ...newBuild(), id, name, profile, points: waypoints.map(([lat, lng]) => ({ lat, lng })), legs: waypoints.slice(1).map(() => null) };
+    S.build = { ...newBuild(), id, name, profile: profile === 'fastbike-lowtraffic' ? PROFILES[0][0] : profile, points: waypoints.map(([lat, lng]) => ({ lat, lng })), legs: waypoints.slice(1).map(() => null) };
     S.building = true;
     S.route = null;
     renderRoutes(view);
